@@ -1,0 +1,379 @@
+diff --git a/.github/workflows/sanity.yml b/.github/workflows/sanity.yml
+new file mode 100644
+index 0000000..1111111
+--- /dev/null
++++ b/.github/workflows/sanity.yml
+@@ -0,0 +1,20 @@
++name: Sanity
++on: [push, pull_request]
++jobs:
++  check:
++    runs-on: ubuntu-latest
++    steps:
++      - uses: actions/checkout@v4
++      - name: Git LFS pointers present
++        run: |
++          git lfs install
++          git lfs ls-files || true
++      - name: List critical folders
++        run: ls -la Assets ProjectSettings Packages || true
+diff --git a/README_SEED.md b/README_SEED.md
+new file mode 100644
+index 0000000..1111111
+--- /dev/null
++++ b/README_SEED.md
+@@ -0,0 +1,52 @@
++# Weavebound — Unity seed
++
++This commit seeds core runtime scripts and CI sanity. Scenes and package pins
++are created in-editor to avoid YAML drift.
++
++## After applying this patch
++
++1) Open the project in **Unity 2022.3 LTS**.
++2) Install packages from Package Manager:
++   - **Universal RP** (2D Renderer)
++   - **2D Pixel Perfect**
++   - **Input System**
++   - **TextMeshPro**
++   - **(Next PR)** Yarn Spinner via OpenUPM
++3) Create scenes (Assets/Scenes):
++   - **Boot.unity**: add empty `Game` object → add `Game.cs`.
++   - **Hub_GardenRuins.unity**: Tilemap Grid; add `PlayerController.cs` to a `Player` object.
++   - **LoomedPass.unity**: same as Hub; different tileset later.
++   - **Battle.unity**: add empty `Battle` object → `BattleController.cs`.
++4) Main Camera → **Pixel Perfect Camera** (reference 320×180, upscale 6× at 1080p).
++5) Project Settings → **Active Input Handling = Input System (New)** (or leave Legacy temporarily).
++6) Temporarily, from Boot add a UI Button or hotkey to load Battle.
++
++## Folder map (added)
++
++- `Assets/Scripts/Core`: bootstrap, scene loading
++- `Assets/Scripts/Overworld`: player movement
++- `Assets/Scripts/Battle`: battle state machine, SOUL movement, patterns
++- `Assets/Scripts/UI`: HUD placeholder
++- `Assets/Scripts/Dialogue`: Yarn hook placeholder
++
++Lock `main` behind PRs. All changes should flow via feature branches with CI green.
+diff --git a/Assets/Scripts/Core/Game.cs b/Assets/Scripts/Core/Game.cs
+new file mode 100644
+index 0000000..1111111
+--- /dev/null
++++ b/Assets/Scripts/Core/Game.cs
+@@ -0,0 +1,21 @@
++using UnityEngine;
++using UnityEngine.SceneManagement;
++
++namespace Weavebound.Core {
++  public class Game : MonoBehaviour {
++    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
++    static void Bootstrap() {
++      var active = SceneManager.GetActiveScene().name;
++      if (active == "Boot") return;
++      SceneManager.LoadScene("Boot");
++    }
++  }
++}
+diff --git a/Assets/Scripts/Core/SceneLoader.cs b/Assets/Scripts/Core/SceneLoader.cs
+new file mode 100644
+index 0000000..1111111
+--- /dev/null
++++ b/Assets/Scripts/Core/SceneLoader.cs
+@@ -0,0 +1,15 @@
++using UnityEngine;
++using UnityEngine.SceneManagement;
++
++namespace Weavebound.Core {
++  public class SceneLoader : MonoBehaviour {
++    public void LoadHub() => SceneManager.LoadScene("Hub_GardenRuins");
++    public void LoadBattle() => SceneManager.LoadScene("Battle");
++    public void LoadLoomedPass() => SceneManager.LoadScene("LoomedPass");
++  }
++}
+diff --git a/Assets/Scripts/Overworld/PlayerController.cs b/Assets/Scripts/Overworld/PlayerController.cs
+new file mode 100644
+index 0000000..1111111
+--- /dev/null
++++ b/Assets/Scripts/Overworld/PlayerController.cs
+@@ -0,0 +1,23 @@
++using UnityEngine;
++
++namespace Weavebound.Overworld {
++  [RequireComponent(typeof(Rigidbody2D))]
++  public class PlayerController : MonoBehaviour {
++    public float speed = 3.0f;
++    Rigidbody2D rb;
++    Vector2 input;
++    void Awake(){ rb = GetComponent<Rigidbody2D>(); rb.gravityScale = 0f; rb.freezeRotation = true; }
++    void Update(){
++      input = new Vector2(Input.GetAxisRaw("Horizontal"), Input.GetAxisRaw("Vertical")).normalized;
++    }
++    void FixedUpdate(){
++      rb.velocity = input * speed;
++    }
++  }
++}
+diff --git a/Assets/Scripts/Battle/IAttackPattern.cs b/Assets/Scripts/Battle/IAttackPattern.cs
+new file mode 100644
+index 0000000..1111111
+--- /dev/null
++++ b/Assets/Scripts/Battle/IAttackPattern.cs
+@@ -0,0 +1,13 @@
++using UnityEngine;
++
++namespace Weavebound.Battle {
++  public interface IAttackPattern {
++    void Begin(Rect box);
++    void Update(float dt, Rect box);
++    void DrawGizmos(Rect box);
++    bool TryHit(Vector2 soul, float soulRadius, out int damage);
++    bool IsDone { get; }
++  }
++}
+diff --git a/Assets/Scripts/Battle/Patterns/Rain.cs b/Assets/Scripts/Battle/Patterns/Rain.cs
+new file mode 100644
+index 0000000..1111111
+--- /dev/null
++++ b/Assets/Scripts/Battle/Patterns/Rain.cs
+@@ -0,0 +1,47 @@
++using UnityEngine;
++using System.Collections.Generic;
++
++namespace Weavebound.Battle {
++  public class Rain : IAttackPattern {
++    struct Drop { public Vector2 p, v; public float r; }
++    List<Drop> drops = new List<Drop>();
++    float t; float len = 3.2f;
++    public void Begin(Rect box){ drops.Clear(); t=0f; }
++    public void Update(float dt, Rect box){
++      t += dt;
++      if (Random.value < 0.22f){
++        var x = Random.Range(box.xMin+6, box.xMax-6);
++        drops.Add(new Drop{ p=new Vector2(x, box.yMin-6), v=new Vector2(0,55), r=2 });
++      }
++      for(int i=0;i<drops.Count;i++){ var d=drops[i]; d.p += d.v*dt; drops[i]=d; }
++      drops.RemoveAll(d => !box.Contains(d.p));
++    }
++    public void DrawGizmos(Rect box){
++      Gizmos.color = Color.white;
++      foreach(var d in drops) Gizmos.DrawWireSphere(d.p, d.r);
++    }
++    public bool TryHit(Vector2 soul, float r, out int dmg){
++      foreach(var d in drops){ if ((soul-d.p).sqrMagnitude <= (d.r+r)*(d.r+r)){ dmg=1; return true; } }
++      dmg=0; return false;
++    }
++    public bool IsDone => t>=len;
++  }
++}
+diff --git a/Assets/Scripts/Battle/Patterns/Wave.cs b/Assets/Scripts/Battle/Patterns/Wave.cs
+new file mode 100644
+index 0000000..1111111
+--- /dev/null
++++ b/Assets/Scripts/Battle/Patterns/Wave.cs
+@@ -0,0 +1,49 @@
++using UnityEngine;
++using System.Collections.Generic;
++
++namespace Weavebound.Battle {
++  public class Wave : IAttackPattern {
++    struct Shot { public Vector2 p, v; public float r, sx; }
++    List<Shot> shots = new List<Shot>();
++    float t; float len = 3.2f;
++    public void Begin(Rect box){ shots.Clear(); t=0f; }
++    public void Update(float dt, Rect box){
++      t += dt;
++      if (Random.value < 0.12f){
++        float y = Random.Range(box.yMin+8, box.yMax-12);
++        int dir = Random.value<0.5f?1:-1;
++        float x = dir>0? box.xMin-6 : box.xMax+6;
++        shots.Add(new Shot{ p=new Vector2(x,y), v=new Vector2(48*dir,0), r=2, sx=Random.value*3.14f });
++      }
++      for(int i=0;i<shots.Count;i++){
++        var s=shots[i]; s.p += s.v*dt; s.p.y += Mathf.Sin((s.sx + s.p.x*0.05f))*20.0f*dt; shots[i]=s;
++      }
++      shots.RemoveAll(s => !box.Contains(s.p));
++    }
++    public void DrawGizmos(Rect box){
++      Gizmos.color = Color.white;
++      foreach(var s in shots) Gizmos.DrawWireSphere(s.p, s.r);
++    }
++    public bool TryHit(Vector2 soul, float r, out int dmg){
++      foreach(var s in shots){ if ((soul-s.p).sqrMagnitude <= (s.r+r)*(s.r+r)){ dmg=1; return true; } }
++      dmg=0; return false;
++    }
++    public bool IsDone => t>=len;
++  }
++}
+diff --git a/Assets/Scripts/Battle/Patterns/Burst.cs b/Assets/Scripts/Battle/Patterns/Burst.cs
+new file mode 100644
+index 0000000..1111111
+--- /dev/null
++++ b/Assets/Scripts/Battle/Patterns/Burst.cs
+@@ -0,0 +1,47 @@
++using UnityEngine;
++using System.Collections.Generic;
++
++namespace Weavebound.Battle {
++  public class Burst : IAttackPattern {
++    struct Shot { public Vector2 p, v; public float r; }
++    List<Shot> shots = new List<Shot>();
++    float t; float len = 3.2f;
++    public void Begin(Rect box){ shots.Clear(); t=0f; }
++    public void Update(float dt, Rect box){
++      t += dt;
++      if (shots.Count==0){
++        Vector2 c = new Vector2((box.xMin+box.xMax)/2f, (box.yMin+box.yMax)/2f);
++        for(int i=0;i<8;i++){
++          float ang = (i/8f)*Mathf.PI*2f;
++          shots.Add(new Shot{ p=c, v=new Vector2(Mathf.Cos(ang)*60, Mathf.Sin(ang)*60), r=2 });
++        }
++      }
++      for(int i=0;i<shots.Count;i++){ var s=shots[i]; s.p += s.v*dt; shots[i]=s; }
++      shots.RemoveAll(s => !box.Contains(s.p));
++    }
++    public void DrawGizmos(Rect box){
++      Gizmos.color = Color.white;
++      foreach(var s in shots) Gizmos.DrawWireSphere(s.p, s.r);
++    }
++    public bool TryHit(Vector2 soul, float r, out int dmg){
++      foreach(var s in shots){ if ((soul-s.p).sqrMagnitude <= (s.r+r)*(s.r+r)){ dmg=1; return true; } }
++      dmg=0; return false;
++    }
++    public bool IsDone => t>=len;
++  }
++}
+diff --git a/Assets/Scripts/Battle/HeartController.cs b/Assets/Scripts/Battle/HeartController.cs
+new file mode 100644
+index 0000000..1111111
+--- /dev/null
++++ b/Assets/Scripts/Battle/HeartController.cs
+@@ -0,0 +1,27 @@
++using UnityEngine;
++
++namespace Weavebound.Battle {
++  public class HeartController : MonoBehaviour {
++    public Rect box = new Rect(40,40,240,140);
++    public float speed = 72f;
++    public float radius = 3f;
++    public Vector2 Position { get; private set; }
++    void Start(){ Position = box.center; }
++    void Update(){
++      float dx = (Input.GetKey(KeyCode.RightArrow)||Input.GetKey(KeyCode.D)?1:0) - (Input.GetKey(KeyCode.LeftArrow)||Input.GetKey(KeyCode.A)?1:0);
++      float dy = (Input.GetKey(KeyCode.UpArrow)||Input.GetKey(KeyCode.W)?1:0) - (Input.GetKey(KeyCode.DownArrow)||Input.GetKey(KeyCode.S)?1:0);
++      var v = new Vector2(dx, -dy); // screen Y down -> world up
++      if (v.sqrMagnitude>1f) v.Normalize();
++      Position += v * speed * Time.deltaTime;
++      Position = new Vector2(Mathf.Clamp(Position.x, box.xMin+radius, box.xMax-radius),
++                             Mathf.Clamp(Position.y, box.yMin+radius, box.yMax-radius));
++    }
++  }
++}
+diff --git a/Assets/Scripts/Battle/BattleController.cs b/Assets/Scripts/Battle/BattleController.cs
+new file mode 100644
+index 0000000..1111111
+--- /dev/null
++++ b/Assets/Scripts/Battle/BattleController.cs
+@@ -0,0 +1,66 @@
++using UnityEngine;
++using System.Collections.Generic;
++
++namespace Weavebound.Battle {
++  public enum BattleMode { Menu, PlayerFight, EnemyTurn, Message }
++
++  public class BattleController : MonoBehaviour {
++    public Rect soulBox = new Rect(40, 120, 240, 140);
++    public BattleMode mode = BattleMode.Menu;
++    public int playerHP = 20, playerMax = 20;
++    public int enemyHP = 32, enemyMax = 32;
++    public string enemyName = "Sprout";
++    public string message = "The air hums.";
++
++    HeartController soul;
++    IAttackPattern pattern;
++    float turnT, turnLen = 3.2f;
++    List<IAttackPattern> bank = new List<IAttackPattern>();
++
++    void Awake(){
++      soul = gameObject.AddComponent<HeartController>();
++      soul.box = soulBox;
++      bank.Add(new Patterns.Rain());
++      bank.Add(new Patterns.Wave());
++      bank.Add(new Patterns.Burst());
++    }
++
++    void Update(){
++      if (mode==BattleMode.Menu){
++        if (Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.Z) || Input.GetKeyDown(KeyCode.Space)){
++          mode = BattleMode.PlayerFight; message = "Time your strike!";
++        }
++      } else if (mode==BattleMode.PlayerFight){
++        if (Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.Z) || Input.GetKeyDown(KeyCode.Space)){
++          int dmg = 12; enemyHP = Mathf.Max(0, enemyHP - dmg);
++          message = $"You dealt {dmg} damage!";
++          if (enemyHP<=0){ mode = BattleMode.Message; return; }
++          pattern = bank[Random.Range(0, bank.Count)];
++          pattern.Begin(soul.box); turnT = 0f; mode = BattleMode.EnemyTurn;
++        }
++      } else if (mode==BattleMode.EnemyTurn){
++        turnT += Time.deltaTime;
++        pattern.Update(Time.deltaTime, soul.box);
++        int dmg; if (pattern.TryHit(soul.Position, soul.radius, out dmg)){ playerHP = Mathf.Max(0, playerHP - dmg); }
++        if (turnT>=turnLen || pattern.IsDone) { mode = BattleMode.Menu; }
++      } else if (mode==BattleMode.Message){
++        if (Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.Z) || Input.GetKeyDown(KeyCode.Space)){
++          mode = BattleMode.Menu;
++        }
++      }
++    }
++  }
++}
+diff --git a/Assets/Scripts/UI/BattleHUD.cs b/Assets/Scripts/UI/BattleHUD.cs
+new file mode 100644
+index 0000000..1111111
+--- /dev/null
++++ b/Assets/Scripts/UI/BattleHUD.cs
+@@ -0,0 +1,10 @@
++using UnityEngine;
++
++namespace Weavebound.UI {
++  public class BattleHUD : MonoBehaviour {
++    // Placeholder for real UI (TMP) wired in next patch.
++    // We'll enforce Undertale-like composition in tests later.
++  }
++}
+diff --git a/Assets/Scripts/Dialogue/YarnHook.cs b/Assets/Scripts/Dialogue/YarnHook.cs
+new file mode 100644
+index 0000000..1111111
+--- /dev/null
++++ b/Assets/Scripts/Dialogue/YarnHook.cs
+@@ -0,0 +1,10 @@
++using UnityEngine;
++
++namespace Weavebound.Dialogue {
++  public class YarnHook : MonoBehaviour {
++    // Placeholder for Yarn Spinner integration (next patch).
++  }
++}
+diff --git a/Docs/SceneSetup.md b/Docs/SceneSetup.md
+new file mode 100644
+index 0000000..1111111
+--- /dev/null
++++ b/Docs/SceneSetup.md
+@@ -0,0 +1,34 @@
++# Scene setup (once)
++
++## Boot
++- Create scene `Boot.unity`
++- Add empty GameObject `Game` → attach `Weavebound.Core.Game`.
++- Add empty GameObject `Loader` → attach `Weavebound.Core.SceneLoader`.
++
++## Hub_GardenRuins
++- Add Grid + Tilemap (2D) for ground.
++- Create `Player` with `Rigidbody2D` (Dynamic) + `Weavebound.Overworld.PlayerController`.
++
++## LoomedPass
++- Same as Hub; swap tileset and props later.
++
++## Battle
++- Add empty `Battle` → attach `Weavebound.Battle.BattleController`.
++- Add Pixel Perfect Camera to Main Camera (reference 320x180).
